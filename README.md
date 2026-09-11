@@ -23,7 +23,6 @@ A modern, full-stack workforce management platform designed to streamline employ
 ### 🎨 User Experience
 - **Beautiful Landing Page**: Modern marketing page showcasing platform features and AI vision
 - **Dual Dashboards**: Separate, optimized views for administrators and employees
-- **Dark/Light Theme**: System-aware theme with manual toggle for user preference
 - **Responsive Design**: Fully responsive across all devices and screen sizes
 - **Real-time Updates**: Live data synchronization using TanStack Query
 
@@ -419,17 +418,3 @@ WorkForcePro is ready for production deployment to Railway (Backend) and Vercel 
 - **🚂 [Railway Setup](./backend/RAILWAY_SETUP.md)** - Backend specific configuration
 - **▲ [Vercel Setup](./frontend/VERCEL_SETUP.md)** - Frontend specific configuration
 
-#### Demo Deployment
-
-- **Live Demo:** [Coming Soon]
-- **API Documentation:** [Coming Soon]
-
-## 👨‍💻 Author
-
-**Sai Varsha Devoju**
-- GitHub: [@saivarshadevoju](https://github.com/saivarshadevoju)
-
----
-
-**Made with ❤️ by Sai Varsha Devoju**
-# Force Vercel rebuild - Fri Feb 20 15:30:59 IST 2026
