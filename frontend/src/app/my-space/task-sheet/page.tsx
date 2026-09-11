@@ -1,0 +1,927 @@
+"use client";
+
+import Image from "next/image";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import MySpaceShell from "@/components/my-space/MySpaceShell";
+import { useAuth } from "@/components/AuthProvider";
+import { Calendar, Link2, Swords, Pencil, Trash2, Filter, Download, Eye } from "lucide-react";
+import { showFloatingToast } from "@/components/ui/FloatingToast";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { buildWeeklyDescription } from "@/lib/htmlUtils";
+import {
+  deleteTaskSheetEntry,
+  getAllTaskSheets,
+  getMyTaskSheets,
+  submitTaskSheet,
+  TaskSheetEntry,
+  updateTaskSheetEntry,
+  getAdminDailyTaskSheetReport,
+  upsertMyWeeklyProgress,
+  DailyTaskSheetReportRow,
+} from "@/lib/api";
+
+const todayStr = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const toDateValue = (date: string) => new Date(`${date}T00:00:00`).getTime();
+
+const formatDateInput = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const AVATAR_COLORS = [
+  "#522B5B", "#854F6C", "#2B124C", "#7C3D6B", "#9C4E7A",
+  "#6B3A5F", "#3D1A4A", "#A05070", "#5A2E54", "#8B4565",
+];
+
+const getInitials = (name?: string | null) =>
+  name ? name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2) : "?";
+
+const colorFor = (id: number) => AVATAR_COLORS[id % AVATAR_COLORS.length];
+
+const fmtLongDate = (date: string) =>
+  new Date(date + "T00:00:00").toLocaleDateString(undefined, {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+export default function TaskSheetPage() {
+  const { user } = useAuth();
+  const [selectedDate, setSelectedDate] = useState(todayStr());
+  const [logFilterDate, setLogFilterDate] = useState(todayStr());
+  const [tasksCompleted, setTasksCompleted] = useState("");
+  const [workImpact, setWorkImpact] = useState("");
+  const [timeTaken, setTimeTaken] = useState("");
+  const [repoLink, setRepoLink] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUpdate, setIsUpdate] = useState(false);
+  const [editingEntryId, setEditingEntryId] = useState<number | null>(null);
+  const [timelineEntries, setTimelineEntries] = useState<TaskSheetEntry[]>([]);
+  const [myEntries, setMyEntries] = useState<TaskSheetEntry[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [pendingDeleteEntry, setPendingDeleteEntry] = useState<TaskSheetEntry | null>(null);
+  const [isDeletingEntry, setIsDeletingEntry] = useState(false);
+  const [isExportingPng, setIsExportingPng] = useState(false);
+  const [weeklyDraftOpen, setWeeklyDraftOpen] = useState(false);
+  const [draftDescription, setDraftDescription] = useState("");
+  const [draftGithubLink, setDraftGithubLink] = useState("");
+  const [draftDeployedLink, setDraftDeployedLink] = useState("");
+  const [draftWeekStart, setDraftWeekStart] = useState("");
+  const [isDraftSending, setIsDraftSending] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+
+  const getWeekRange = (dateString: string) => {
+    const d = new Date(`${dateString}T12:00:00`);
+    const day = d.getDay();
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - ((day + 6) % 7));
+    monday.setHours(0, 0, 0, 0);
+
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+
+    return { monday, sunday };
+  };
+
+  const formatWeekRange = (monday: Date, sunday: Date) => {
+    return `${monday.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${sunday.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+  };
+
+  const buildWeeklySheetDraftFromTaskLogs = (dateString: string) => {
+    const { monday, sunday } = getWeekRange(dateString);
+    const weekEntries = myEntries
+      .filter((entry) => {
+        const entryDate = new Date(`${entry.date}T12:00:00`);
+        return entryDate >= monday && entryDate <= sunday;
+      })
+      .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
+
+    const weekLabel = formatWeekRange(monday, sunday);
+    const entryLines = weekEntries.length > 0
+      ? weekEntries.map((entry) => {
+          const dayLabel = new Date(`${entry.date}T12:00:00`).toLocaleDateString(undefined, {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          });
+          return `- ${dayLabel}: ${entry.tasks_completed.trim()} Impact: ${entry.work_impact.trim()} Time: ${entry.time_taken.trim()}`;
+        }).join("\n")
+      : "- No daily task sheet entries were recorded for this week.";
+
+    const weeklyEntry = `Weekly overview for week of ${weekLabel}:\n${entryLines}`;
+    const highlights = weekEntries.length > 0
+      ? weekEntries.slice(0, 3).map((entry) => {
+          const dayLabel = new Date(`${entry.date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" });
+          const summary = entry.work_impact.trim().split(".")[0] || entry.tasks_completed.trim();
+          return `- ${dayLabel}: ${summary}`;
+        }).join("\n")
+      : "- No highlights available yet.";
+
+    const difficultyMatches = weekEntries
+      .filter((entry) => /delay|blocked|issue|failed|bug|error|challenge/i.test(`${entry.tasks_completed} ${entry.work_impact}`));
+    const difficulties = difficultyMatches.length > 0
+      ? difficultyMatches.map((entry) => {
+          const dayLabel = new Date(`${entry.date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" });
+          return `- ${dayLabel}: ${entry.work_impact.trim() || entry.tasks_completed.trim()}`;
+        }).join("\n")
+      : "- No major difficulties were logged this week.";
+
+    const draft = buildWeeklyDescription(weeklyEntry, highlights, difficulties);
+    const latestRepo = [...weekEntries].reverse().find((entry) => entry.repo_link)?.repo_link || "";
+
+    return {
+      draft,
+      weekStart: monday.toISOString().slice(0, 10),
+      githubLink: latestRepo,
+      deployedLink: "",
+    };
+  };
+
+  const handleGenerateWeeklyDraft = () => {
+    const draftData = buildWeeklySheetDraftFromTaskLogs(selectedDate);
+    setDraftDescription(draftData.draft);
+    setDraftGithubLink(draftData.githubLink);
+    setDraftDeployedLink(draftData.deployedLink);
+    setDraftWeekStart(draftData.weekStart);
+    setWeeklyDraftOpen(true);
+    showFloatingToast({ type: "success", message: "Weekly sheet draft generated. Edit it and send when ready." });
+  };
+
+  const handleSendWeeklyDraft = async () => {
+    if (!draftDescription.trim()) {
+      showFloatingToast({ type: "error", message: "Draft content is empty. Generate a draft first." });
+      return;
+    }
+    setIsDraftSending(true);
+    try {
+      const res = await upsertMyWeeklyProgress({
+        week_start_date: draftWeekStart || getWeekRange(selectedDate).monday.toISOString().slice(0, 10),
+        description: draftDescription.trim(),
+        github_link: draftGithubLink.trim() || undefined,
+        deployed_link: draftDeployedLink.trim() || undefined,
+      });
+      if (res.error) {
+        showFloatingToast({ type: "error", message: res.error });
+      } else {
+        showFloatingToast({ type: "success", message: "Weekly sheet draft saved to history." });
+        setWeeklyDraftOpen(false);
+      }
+    } catch (err: any) {
+      showFloatingToast({ type: "error", message: err?.message || "Failed to save weekly sheet." });
+    } finally {
+      setIsDraftSending(false);
+    }
+  };
+
+  const buildWeekLabel = (dateString: string) => {
+    const { monday, sunday } = getWeekRange(dateString);
+    return formatWeekRange(monday, sunday);
+  };
+
+  const loadTaskSheets = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      setIsLoadingHistory(true);
+      const [timelineRes, personalRes] = await Promise.all([
+        getAllTaskSheets(500),
+        getMyTaskSheets(500),
+      ]);
+
+      setTimelineEntries(timelineRes.data ?? personalRes.data ?? []);
+      setMyEntries(personalRes.data ?? []);
+    } catch (err) {
+      console.error("Failed to load task sheet data", err);
+      setTimelineEntries([]);
+      setMyEntries([]);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void loadTaskSheets();
+  }, [loadTaskSheets]);
+
+  useEffect(() => {
+    if (!myEntries.length) {
+      setTasksCompleted("");
+      setWorkImpact("");
+      setTimeTaken("");
+      setRepoLink("");
+      setIsUpdate(false);
+      setEditingEntryId(null);
+      return;
+    }
+    const selectedEntry = myEntries.find((e) => e.date === selectedDate);
+    if (selectedEntry) {
+      setTasksCompleted(selectedEntry.tasks_completed);
+      setWorkImpact(selectedEntry.work_impact);
+      setTimeTaken(selectedEntry.time_taken);
+      setRepoLink(selectedEntry.repo_link || "");
+      setIsUpdate(true);
+      setEditingEntryId(selectedEntry.id);
+    } else {
+      setTasksCompleted("");
+      setWorkImpact("");
+      setTimeTaken("");
+      setRepoLink("");
+      setIsUpdate(false);
+      setEditingEntryId(null);
+    }
+  }, [myEntries, selectedDate]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tasksCompleted.trim() || !workImpact.trim() || !timeTaken.trim()) {
+      showFloatingToast({ type: "error", message: "Please fill in all required fields." });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        tasks_completed: tasksCompleted,
+        work_impact: workImpact,
+        time_taken: timeTaken,
+        repo_link: repoLink || undefined,
+        date: selectedDate,
+      };
+      const res = editingEntryId
+        ? await updateTaskSheetEntry(editingEntryId, payload)
+        : await submitTaskSheet(payload);
+      if (res.error) {
+        showFloatingToast({ type: "error", message: res.error });
+      } else {
+        setIsUpdate(true);
+        await loadTaskSheets();
+        showFloatingToast({
+          type: "success",
+          message: editingEntryId ? "Task sheet updated successfully." : "Task sheet saved successfully."
+        });
+      }
+    } catch (err: any) {
+      showFloatingToast({ type: "error", message: err?.message || "Failed to submit task sheet." });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleEditEntry = (entry: TaskSheetEntry) => {
+    setSelectedDate(entry.date);
+    setTasksCompleted(entry.tasks_completed);
+    setWorkImpact(entry.work_impact);
+    setTimeTaken(entry.time_taken);
+    setRepoLink(entry.repo_link || "");
+    setIsUpdate(true);
+    setEditingEntryId(entry.id);
+    showFloatingToast({ type: "success", message: "Entry loaded for editing." });
+  };
+
+  const handleDeleteEntry = async (entry: TaskSheetEntry) => {
+    setPendingDeleteEntry(entry);
+  };
+
+  const confirmDeleteEntry = async () => {
+    if (!pendingDeleteEntry) return;
+    setIsDeletingEntry(true);
+    const entry = pendingDeleteEntry;
+    const res = await deleteTaskSheetEntry(entry.id);
+    if (res.error) {
+      showFloatingToast({ type: "error", message: res.error });
+      setIsDeletingEntry(false);
+      return;
+    }
+    if (editingEntryId === entry.id) {
+      setEditingEntryId(null);
+      setTasksCompleted("");
+      setWorkImpact("");
+      setTimeTaken("");
+      setRepoLink("");
+      setIsUpdate(false);
+    }
+    await loadTaskSheets();
+    setPendingDeleteEntry(null);
+    setIsDeletingEntry(false);
+    showFloatingToast({ type: "delete", message: "Entry deleted." });
+  };
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  const downloadCanvasAsJpeg = (canvas: HTMLCanvasElement, filename: string) => {
+    const tryBlob = async (): Promise<Blob> => {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((b) => {
+          if (b) resolve(b);
+          else reject(new Error("Failed to generate the report image."));
+        }, "image/jpeg", 0.95);
+      });
+      return blob;
+    };
+
+    try {
+      void tryBlob().then((blob) => downloadBlob(blob, filename)).catch(() => {
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
+        const link = document.createElement("a");
+        link.href = dataUrl;
+        link.download = filename;
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      });
+    } catch {
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = filename;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  const getWrappedLines = (
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    maxWidth: number
+  ): string[] => {
+    const words = String(text).split(" ");
+    const lines: string[] = [];
+    let current = "";
+    words.forEach((word) => {
+      const testLine = current ? `${current} ${word}` : word;
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = testLine;
+      }
+    });
+    if (current) lines.push(current);
+    return lines.length ? lines : ["-"];
+  };
+
+  const buildReportCanvas = (date: string, rows: Array<DailyTaskSheetReportRow>) => {
+    const padding = 24;
+    const tableTop = 110;
+    const rowPaddingY = 12;
+    const lineHeight = 20;
+    const headerHeight = 48;
+    const colWidths = [180, 320, 320, 140];
+    const headers = ["Name", "Tasks Completed", "Impact / Usefulness", "Time Taken"];
+    const tableWidth = colWidths.reduce((a, b) => a + b, 0);
+    const width = padding * 2 + tableWidth;
+
+    const scratch = document.createElement("canvas");
+    const sctx = scratch.getContext("2d");
+    if (!sctx) throw new Error("Canvas not supported.");
+    sctx.font = "15px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+
+    const reportRows = (rows ?? []).map((row) => ({
+      name: String(row?.user_name || row?.user_email || "-"),
+      tasksCompleted: String(row?.tasks_completed || "-"),
+      workImpact: String(row?.work_impact || "-"),
+      timeTaken: String(row?.time_taken || "-"),
+    }));
+
+    const computedRows = reportRows.map((row) => {
+      const wrapped = [
+        getWrappedLines(sctx, row.name, colWidths[0] - 20),
+        getWrappedLines(sctx, row.tasksCompleted, colWidths[1] - 20),
+        getWrappedLines(sctx, row.workImpact, colWidths[2] - 20),
+        getWrappedLines(sctx, row.timeTaken, colWidths[3] - 20),
+      ];
+      const maxLines = Math.max(1, ...wrapped.map((w) => w.length));
+      const height = rowPaddingY * 2 + maxLines * lineHeight;
+      return { wrapped, height };
+    });
+
+    const bodyHeight = computedRows.reduce((sum, r) => sum + r.height, 0);
+    const height = tableTop + headerHeight + bodyHeight + 20;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas not supported.");
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = "#64748b";
+    ctx.font = "700 12px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+    ctx.fillText("WORKFORCE PRO", padding, 28);
+
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "700 28px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+    ctx.fillText("Daily Task Sheet Report", padding, 62);
+
+    ctx.fillStyle = "#334155";
+    ctx.font = "500 16px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+    ctx.fillText(fmtLongDate(date), padding, 86);
+
+    let x = padding;
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillRect(padding, tableTop, tableWidth, headerHeight);
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(padding, tableTop, tableWidth, headerHeight);
+
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "700 14px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+    headers.forEach((h, idx) => {
+      ctx.fillText(h, x + 10, tableTop + 30);
+      if (idx < headers.length - 1) {
+        ctx.beginPath();
+        ctx.moveTo(x + colWidths[idx], tableTop);
+        ctx.lineTo(x + colWidths[idx], tableTop + headerHeight);
+        ctx.stroke();
+      }
+      x += colWidths[idx];
+    });
+
+    let y = tableTop + headerHeight;
+    computedRows.forEach((rowData) => {
+      let cellX = padding;
+      ctx.strokeStyle = "#e2e8f0";
+      ctx.strokeRect(padding, y, tableWidth, rowData.height);
+
+      rowData.wrapped.forEach((lines, colIdx) => {
+        ctx.fillStyle = "#0f172a";
+        ctx.font = "400 14px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
+        lines.forEach((line, lineIdx) => {
+          ctx.fillText(line, cellX + 10, y + rowPaddingY + 16 + lineIdx * lineHeight);
+        });
+
+        if (colIdx < colWidths.length - 1) {
+          ctx.beginPath();
+          ctx.moveTo(cellX + colWidths[colIdx], y);
+          ctx.lineTo(cellX + colWidths[colIdx], y + rowData.height);
+          ctx.stroke();
+        }
+        cellX += colWidths[colIdx];
+      });
+
+      y += rowData.height;
+    });
+
+    return canvas;
+  };
+
+  const handleDownloadPng = async () => {
+    if (user?.role !== "admin") return;
+    setIsExportingPng(true);
+    try {
+      const reportDate = logFilterDate;
+      const reportRes = await getAdminDailyTaskSheetReport(reportDate);
+      if (!reportRes.data) {
+        throw new Error(reportRes.error || "Failed to load daily task sheet report data.");
+      }
+
+      const canvas = buildReportCanvas(reportDate, reportRes.data);
+      downloadCanvasAsJpeg(canvas, `workforce-pro-task-sheet-${reportDate}.jpg`);
+    } catch (err: any) {
+      console.error("JPEG export failed", err);
+      showFloatingToast({ type: "error", message: err?.message || "Failed to download JPEG." });
+    } finally {
+      setIsExportingPng(false);
+    }
+  };
+
+  const handlePreviewReport = async () => {
+    if (user?.role !== "admin") return;
+    setIsPreviewLoading(true);
+    try {
+      const reportDate = logFilterDate;
+      const reportRes = await getAdminDailyTaskSheetReport(reportDate);
+      if (!reportRes.data) {
+        throw new Error(reportRes.error || "Failed to load daily task sheet report data.");
+      }
+
+      const canvas = buildReportCanvas(reportDate, reportRes.data);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
+      setPreviewImage(dataUrl);
+      setIsPreviewOpen(true);
+    } catch (err: any) {
+      console.error("Preview failed", err);
+      showFloatingToast({ type: "error", message: err?.message || "Failed to generate preview." });
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  const filteredEntries = useMemo(() => {
+    return [...timelineEntries]
+      .filter((entry) => entry.date === logFilterDate)
+      .sort((left, right) => {
+        const createdDiff = new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+        return -createdDiff;
+      });
+  }, [timelineEntries, logFilterDate]);
+
+  if (!user) return null;
+
+  return (
+    <MySpaceShell>
+      <div className="max-w-3xl mx-auto space-y-6 pb-20">
+        {/* Form Card */}
+        <div className="rounded-2xl p-6 md:p-8 shadow-sm lighthouse-card">
+          <div className="flex items-center gap-3 mb-6">
+            <Swords size={24} className="lighthouse-accent" />
+            <h3 className="text-xl font-bold text-[#2B124C] dark:text-purple-100">Daily Impact Log</h3>
+          </div>
+
+          <div className="mb-5 flex items-center gap-2">
+            <Calendar size={15} className="lighthouse-muted" />
+            <label className="text-xs font-medium text-[#854F6C] dark:text-purple-400">Entry Date</label>
+            <input
+              type="date"
+              value={selectedDate}
+              max={todayStr()}
+                onChange={(e) => setSelectedDate(e.target.value)}
+              className="h-8 px-2 rounded-lg text-sm focus:outline-none transition-all lighthouse-input-white"
+            />
+          </div>
+          {selectedDate !== todayStr() && (
+            <div className="mb-4 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2 lighthouse-date-note">
+              <Calendar size={13} />
+              Backfilling task sheet for <span className="font-bold">{fmtLongDate(selectedDate)}</span>
+            </div>
+          )}
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-1 text-[#522B5B] dark:text-purple-300">Tasks Completed *</label>
+                <textarea
+                  value={tasksCompleted}
+                  onChange={(e) => setTasksCompleted(e.target.value)}
+                  placeholder="What specific tasks were completed today?"
+                  className="w-full min-h-[100px] p-3 rounded-lg text-sm focus:outline-none transition-all resize-y lighthouse-input"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1 text-[#522B5B] dark:text-purple-300">Usefulness / Impact *</label>
+                <textarea
+                  value={workImpact}
+                  onChange={(e) => setWorkImpact(e.target.value)}
+                  placeholder="How did this work help the company?"
+                  className="w-full min-h-[80px] p-3 rounded-lg text-sm focus:outline-none transition-all resize-y lighthouse-input"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1 text-[#522B5B] dark:text-purple-300">Approximate Time Taken *</label>
+                <input
+                  type="text"
+                  value={timeTaken}
+                  onChange={(e) => setTimeTaken(e.target.value)}
+                  placeholder="e.g. 2 hours, Full day"
+                  className="w-full h-10 px-3 rounded-lg text-sm focus:outline-none transition-all lighthouse-input"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1 text-[#522B5B] dark:text-purple-300">Direct Repository Link</label>
+              <input type="url" value={repoLink} onChange={(e) => setRepoLink(e.target.value)} placeholder="https://github.com/..." className="w-full h-10 px-3 rounded-lg text-sm focus:outline-none transition-all lighthouse-input" />
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row gap-3">
+              <button 
+                type="submit" 
+                disabled={isSubmitting} 
+                className="flex-1 h-11 bg-primary text-white font-semibold rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed hover:opacity-90"
+              >
+                {isSubmitting ? (
+                  <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                ) : editingEntryId ? (
+                  <>Save Changes</>
+                ) : isUpdate ? (
+                  <>Update Daily Log</>
+                ) : (
+                  <>Publish Daily Log</>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleGenerateWeeklyDraft}
+                className="h-11 px-4 border border-slate-300/70 dark:border-white/10 text-[#522B5B] dark:text-purple-300 font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-white/5 transition-all text-sm"
+              >
+                Generate Weekly Sheet Draft
+              </button>
+
+              {(editingEntryId || isUpdate || tasksCompleted || workImpact || timeTaken || repoLink) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingEntryId(null);
+                    setIsUpdate(false);
+                    setTasksCompleted("");
+                    setWorkImpact("");
+                    setTimeTaken("");
+                    setRepoLink("");
+                  }}
+                  className="h-11 px-4 border border-slate-300/70 dark:border-white/10 text-[#522B5B] dark:text-purple-300 font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-white/5 transition-all text-sm"
+                >
+                  {editingEntryId ? "Cancel Edit" : "Clear Form"}
+                </button>
+              )}
+            </div>
+          </form>
+
+          {weeklyDraftOpen && (
+            <div className="mt-6 rounded-2xl p-6 border border-dashed border-slate-300/70 bg-slate-50 dark:bg-slate-900 dark:border-slate-700">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div>
+                  <p className="text-sm font-semibold text-[#2B124C] dark:text-purple-100">Weekly Sheet Draft</p>
+                  <p className="text-xs text-[#854F6C] dark:text-purple-300">Review and edit before sending to Weekly Progress history.</p>
+                </div>
+                <div className="text-xs text-muted-foreground">Week: {buildWeekLabel(selectedDate)}</div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-[#522B5B] dark:text-purple-300">Draft Description</label>
+                  <textarea
+                    value={draftDescription}
+                    onChange={(e) => setDraftDescription(e.target.value)}
+                    rows={10}
+                    className="w-full p-3 rounded-lg text-sm focus:outline-none transition-all resize-y lighthouse-input"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-[#522B5B] dark:text-purple-300">GitHub Link</label>
+                    <input
+                      type="url"
+                      value={draftGithubLink}
+                      onChange={(e) => setDraftGithubLink(e.target.value)}
+                      placeholder="https://github.com/..."
+                      className="w-full h-11 px-3 rounded-lg text-sm focus:outline-none transition-all lighthouse-input"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-[#522B5B] dark:text-purple-300">Deployed Link</label>
+                    <input
+                      type="url"
+                      value={draftDeployedLink}
+                      onChange={(e) => setDraftDeployedLink(e.target.value)}
+                      placeholder="https://..."
+                      className="w-full h-11 px-3 rounded-lg text-sm focus:outline-none transition-all lighthouse-input"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSendWeeklyDraft}
+                    disabled={isDraftSending}
+                    className="flex-1 h-11 bg-emerald-600 text-white font-semibold rounded-lg transition-all hover:bg-emerald-500 disabled:opacity-70 disabled:cursor-not-allowed"
+                  >
+                    {isDraftSending ? (
+                      <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                    ) : (
+                      <>Send Weekly Sheet</>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWeeklyDraftOpen(false)}
+                    className="h-11 px-4 border border-slate-300/70 dark:border-white/10 text-[#522B5B] dark:text-purple-300 font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-white/5 transition-all text-sm"
+                  >
+                    Close Draft
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Timeline History - Grouped by Date */}
+        <div className="mt-8">
+          <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <h3 className="text-lg font-bold text-[#2B124C] dark:text-purple-100">Chronological Work Journey</h3>
+            <div className="flex items-center gap-3 flex-wrap">
+              <Filter size={14} className="lighthouse-muted" />
+              <label className="text-xs font-medium text-[#854F6C] dark:text-purple-400">Filter by date</label>
+              <input
+                type="date"
+                value={logFilterDate}
+                max={todayStr()}
+                onChange={(e) => setLogFilterDate(e.target.value)}
+                className="h-8 px-2 rounded-lg text-sm focus:outline-none lighthouse-input-white"
+              />
+              {user?.role === "admin" && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handlePreviewReport}
+                    disabled={isPreviewLoading}
+                    className="h-8 px-3 rounded-lg border border-slate-300/70 dark:border-white/20 text-xs text-[#522B5B] dark:text-purple-200 hover:bg-slate-200/70 dark:hover:bg-white/10 inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Preview daily task sheet report"
+                  >
+                    {isPreviewLoading ? (
+                      <div className="h-3 w-3 rounded-full border-2 border-[#522B5B]/30 dark:border-white/20 border-t-[#522B5B] dark:border-t-white animate-spin" />
+                    ) : (
+                      <Eye size={14} />
+                    )}
+                    <span className="hidden sm:inline">{isPreviewLoading ? "Loading..." : "Preview"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadPng}
+                    disabled={isExportingPng}
+                    className="h-8 px-3 rounded-lg border border-slate-300/70 dark:border-white/20 text-xs text-[#522B5B] dark:text-purple-200 hover:bg-slate-200/70 dark:hover:bg-white/10 inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Download daily task sheet JPEG"
+                  >
+                    {isExportingPng ? (
+                      <div className="h-3 w-3 rounded-full border-2 border-[#522B5B]/30 dark:border-white/20 border-t-[#522B5B] dark:border-t-white animate-spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    <span className="hidden sm:inline">{isExportingPng ? "Exporting..." : "Download Report"}</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <p className="text-xs mb-3 text-[#854F6C] dark:text-purple-400">
+            Showing entries for{" "}
+            <span className="font-semibold text-[#522B5B] dark:text-purple-300">
+              {fmtLongDate(logFilterDate)}
+            </span>
+          </p>
+
+          {isLoadingHistory ? (
+            <div className="flex items-center justify-center py-10"><div className="h-6 w-6 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: "#522B5B", borderTopColor: "transparent" }} /></div>
+          ) : filteredEntries.length === 0 ? (
+            <div className="rounded-xl p-8 text-center text-sm lighthouse-empty">
+              No mission records found for {new Date(logFilterDate + "T00:00:00").toLocaleDateString()}.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {filteredEntries.map((entry) => (
+                <div key={entry.id} className="rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow lighthouse-inner-card">
+                  <div className="flex items-center gap-3 mb-4">
+                    {entry.profile_picture ? (
+                      <Image
+                        src={entry.profile_picture}
+                        alt={entry.user_name || "User"}
+                        width={36}
+                        height={36}
+                        className="h-9 w-9 rounded-full object-cover flex-shrink-0"
+                        unoptimized
+                      />
+                    ) : (
+                      <div
+                        className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                        style={{ background: colorFor(entry.user_id) }}
+                      >
+                        {getInitials(entry.user_name)}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate text-[#2B124C] dark:text-purple-100">
+                        {entry.user_name ?? entry.user_email ?? `User #${entry.user_id}`}
+                      </p>
+                      <div className="flex items-center gap-2 text-xs text-[#854F6C] dark:text-purple-400">
+                        <Calendar size={11} />
+                        {new Date(entry.date + "T00:00:00").toLocaleDateString()}
+                      </div>
+                    </div>
+                    {(entry.user_id === user?.id || user?.role === "admin") && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleEditEntry(entry)}
+                          className="h-8 px-2.5 rounded-lg border border-slate-300/70 dark:border-white/20 text-xs text-[#522B5B] dark:text-purple-200 hover:bg-slate-200/70 dark:hover:bg-white/10 inline-flex items-center gap-1"
+                        >
+                          <Pencil size={12} /> Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteEntry(entry)}
+                          className="h-8 px-2.5 rounded-lg border border-red-300/70 dark:border-red-400/30 text-xs text-red-700 dark:text-red-300 hover:bg-red-100/70 dark:hover:bg-red-500/10 inline-flex items-center gap-1"
+                        >
+                          <Trash2 size={12} /> Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="rounded-lg p-3 lighthouse-sub-card">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider mb-1 text-[#854F6C] dark:text-purple-400">Tasks Completed</p>
+                      <p className="text-sm text-[#2B124C] dark:text-purple-100 whitespace-pre-wrap">{entry.tasks_completed}</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="rounded-lg p-3 lighthouse-sub-card">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider mb-1 text-[#854F6C] dark:text-purple-400">Impact / Usefulness</p>
+                        <p className="text-sm text-[#2B124C] dark:text-purple-100 whitespace-pre-wrap">{entry.work_impact}</p>
+                      </div>
+                      <div className="rounded-lg p-3 lighthouse-sub-card">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider mb-1 text-[#854F6C] dark:text-purple-400">Time Taken</p>
+                        <p className="text-sm text-[#2B124C] dark:text-purple-100 whitespace-pre-wrap">{entry.time_taken}</p>
+                      </div>
+                    </div>
+                  </div>                  {entry.repo_link && (
+                    <a
+                      href={entry.repo_link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors lighthouse-repo-link"
+                    >
+                      <Link2 size={12} /> View Repository
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {pendingDeleteEntry && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-sm p-4">
+            <div className="w-full max-w-md rounded-2xl border border-slate-200/70 dark:border-white/15 bg-white dark:bg-[#221038] p-5 shadow-xl">
+              <h4 className="text-base font-bold text-[#2B124C] dark:text-purple-100">Delete Entry?</h4>
+              <p className="mt-2 text-sm text-[#854F6C] dark:text-purple-300">
+                Delete your task sheet entry for <span className="font-semibold">{fmtLongDate(pendingDeleteEntry.date)}</span>?
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPendingDeleteEntry(null)}
+                  disabled={isDeletingEntry}
+                  className="h-9 px-3 rounded-lg border border-slate-300/70 dark:border-white/20 text-xs font-medium text-[#522B5B] dark:text-purple-200 hover:bg-slate-100/80 dark:hover:bg-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeleteEntry}
+                  disabled={isDeletingEntry}
+                  className="h-9 px-3 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 disabled:opacity-70 inline-flex items-center gap-1.5"
+                >
+                  {isDeletingEntry ? (
+                    <div className="h-3.5 w-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                  ) : (
+                    <Trash2 size={12} />
+                  )}
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+          <DialogContent className="max-w-5xl w-[90vw] h-[90vh] flex flex-col p-0 overflow-hidden bg-slate-50 dark:bg-slate-900 border-none">
+            <DialogHeader className="p-4 border-b bg-white dark:bg-black/40 shadow-sm flex-shrink-0">
+              <DialogTitle className="text-xl font-bold">Daily Task Sheet Preview</DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 overflow-auto p-4 flex justify-center bg-slate-100 dark:bg-black/20">
+              {previewImage && (
+                <img
+                  src={previewImage}
+                  alt="Report Preview"
+                  className="max-w-full h-auto object-contain shadow-lg rounded border border-slate-200 dark:border-slate-800"
+                />
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </MySpaceShell>
+  );
+}
