@@ -1,10 +1,12 @@
 #!/bin/bash
 
-# WorkForcePro Deployment Verification Script
-# This script helps verify your deployment is ready
+# WorkForcePro Deployment Verification Script (Vercel-only)
+# Helps confirm the repo is ready to deploy to Vercel as:
+#   1. Backend project  → repo root (FastAPI via Vercel Python Functions)
+#   2. Frontend project → frontend/ (Next.js)
 
-echo "🚀 WorkForcePro Deployment Verification"
-echo "======================================="
+echo "WorkForce Pro Deployment Verification (Vercel)"
+echo "==============================================="
 echo ""
 
 # Colors for output
@@ -13,127 +15,67 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Function to check command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
+check() {
+    if [ -f "$1" ]; then
+        echo -e "${GREEN}✓${NC} $1 exists"
+    else
+        echo -e "${RED}✗${NC} $1 not found"
+    fi
 }
 
-# Check Git
-echo "Checking Git..."
-if command_exists git; then
-    echo -e "${GREEN}✓${NC} Git is installed"
-    GIT_REMOTE=$(git remote get-url origin 2>/dev/null)
-    if [ -n "$GIT_REMOTE" ]; then
-        echo -e "${GREEN}✓${NC} Git remote configured: $GIT_REMOTE"
-    else
-        echo -e "${RED}✗${NC} No Git remote configured"
-        echo "  Run: git remote add origin https://github.com/saivarshadevoju/WorkForcePro.git"
-    fi
-else
-    echo -e "${RED}✗${NC} Git is not installed"
-fi
+# Backend project (repo root) files
+echo "Backend project (Vercel, repo root):"
+check "api/index.py"
+check "requirements.txt"
+check "vercel.json"
+check "backend/requirements.txt"
+check "backend/.env.example"
 echo ""
 
-# Check if there are uncommitted changes
-echo "Checking for uncommitted changes..."
+# Frontend project files
+echo "Frontend project (Vercel, root directory=frontend):"
+check "frontend/package.json"
+check "frontend/vercel.json"
+check "frontend/next.config.js"
+check "frontend/.env.local.example"
+echo ""
+
+# CI
+echo "CI:"
+check ".github/workflows/ci.yml"
+echo ""
+
+# Git
+if git remote get-url origin >/dev/null 2>&1; then
+    echo -e "${GREEN}✓${NC} Git remote configured: $(git remote get-url origin)"
+else
+    echo -e "${YELLOW}⚠${NC} No Git remote configured"
+fi
 if git diff-index --quiet HEAD -- 2>/dev/null; then
     echo -e "${GREEN}✓${NC} No uncommitted changes"
 else
-    echo -e "${YELLOW}⚠${NC} You have uncommitted changes"
-    echo "  Commit your changes before deploying"
+    echo -e "${YELLOW}⚠${NC} You have uncommitted changes — commit before deploying"
 fi
 echo ""
 
-# Check backend files
-echo "Checking backend files..."
-if [ -f "backend/requirements.txt" ]; then
-    echo -e "${GREEN}✓${NC} backend/requirements.txt exists"
-else
-    echo -e "${RED}✗${NC} backend/requirements.txt not found"
-fi
-
-if [ -f "backend/Procfile" ]; then
-    echo -e "${GREEN}✓${NC} backend/Procfile exists"
-else
-    echo -e "${RED}✗${NC} backend/Procfile not found"
-fi
-
-if [ -f "backend/railway.json" ]; then
-    echo -e "${GREEN}✓${NC} backend/railway.json exists"
-else
-    echo -e "${RED}✗${NC} backend/railway.json not found"
-fi
-
-if [ -f "backend/.env.example" ]; then
-    echo -e "${GREEN}✓${NC} backend/.env.example exists"
-else
-    echo -e "${YELLOW}⚠${NC} backend/.env.example not found"
-fi
-echo ""
-
-# Check frontend files
-echo "Checking frontend files..."
-if [ -f "frontend/package.json" ]; then
-    echo -e "${GREEN}✓${NC} frontend/package.json exists"
-else
-    echo -e "${RED}✗${NC} frontend/package.json not found"
-fi
-
-if [ -f "frontend/vercel.json" ]; then
-    echo -e "${GREEN}✓${NC} frontend/vercel.json exists"
-else
-    echo -e "${RED}✗${NC} frontend/vercel.json not found"
-fi
-
-if [ -f "frontend/.env.local.example" ]; then
-    echo -e "${GREEN}✓${NC} frontend/.env.local.example exists"
-else
-    echo -e "${YELLOW}⚠${NC} frontend/.env.local.example not found"
-fi
-echo ""
-
-# Check documentation
-echo "Checking deployment documentation..."
-if [ -f "DEPLOYMENT_GUIDE.md" ]; then
-    echo -e "${GREEN}✓${NC} DEPLOYMENT_GUIDE.md exists"
-else
-    echo -e "${RED}✗${NC} DEPLOYMENT_GUIDE.md not found"
-fi
-
-if [ -f "DEPLOYMENT_CHECKLIST.md" ]; then
-    echo -e "${GREEN}✓${NC} DEPLOYMENT_CHECKLIST.md exists"
-else
-    echo -e "${YELLOW}⚠${NC} DEPLOYMENT_CHECKLIST.md not found"
-fi
-echo ""
-
-# Generate SECRET_KEY
-echo "Generating SECRET_KEY..."
-if command_exists openssl; then
+# SECRET_KEY generator
+echo "Generating a SECRET_KEY for production..."
+if command_exists() { command -v "$1" >/dev/null 2>&1; } && command_exists openssl; then
     SECRET_KEY=$(openssl rand -hex 32)
-    echo -e "${GREEN}✓${NC} SECRET_KEY generated: ${SECRET_KEY}"
-    echo "  Copy this for Railway environment variables"
+    echo -e "${GREEN}✓${NC} Generated SECRET_KEY: ${SECRET_KEY}"
+    echo "  Set this on the Vercel backend project env."
 else
-    echo -e "${YELLOW}⚠${NC} OpenSSL not found, cannot generate SECRET_KEY"
-    echo "  You can use any long random string (32+ characters)"
+    echo -e "${YELLOW}⚠${NC} OpenSSL not found — use any long random string (32+ chars) as SECRET_KEY."
 fi
 echo ""
 
-# Summary
 echo "======================================="
-echo "📋 Deployment Checklist"
+echo "Deploy checklist"
 echo "======================================="
-echo ""
-echo "Before deploying, ensure:"
-echo "  1. All changes are committed and pushed to GitHub"
-echo "  2. Railway account is created"
-echo "  3. Vercel account is created"
-echo "  4. You have the SECRET_KEY ready (see above)"
-echo ""
-echo "Next steps:"
-echo "  1. Read DEPLOYMENT_GUIDE.md for detailed instructions"
-echo "  2. Follow DEPLOYMENT_CHECKLIST.md step by step"
-echo "  3. Deploy backend to Railway first"
-echo "  4. Then deploy frontend to Vercel"
-echo ""
-echo "Good luck! 🚀"
+echo "  1. Backend project on Vercel (root dir = /):"
+echo "     - Env: DATABASE_URL, SECRET_KEY, FRONTEND_URL, CRON_SECRET (for Vercel Cron)"
+echo "     - First deploy: SKIP_STARTUP_BOOTSTRAP=0 (runs migrations once), then remove/set=1"
+echo "  2. Frontend project on Vercel (root dir = frontend):"
+echo "     - Env: BACKEND_API_URL and NEXT_PUBLIC_API_URL = <backend>.vercel.app"
+echo "  3. Configure Vercel Cron Jobs with a Cron Secret equal to CRON_SECRET"
+echo "See the README 'Deployment' section for full steps."

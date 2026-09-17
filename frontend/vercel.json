@@ -1,13 +1,6 @@
 {
+  "framework": "nextjs",
   "buildCommand": "npm run build",
   "devCommand": "npm run dev",
-  "installCommand": "npm install",
-  "framework": "nextjs",
-  "outputDirectory": ".next",
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "https://workforcepro-demo-app-production.up.railway.app/$1"
-    }
-  ]
+  "installCommand": "npm install"
 }

@@ -21,18 +21,26 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup: Create database tables
     create_db_and_tables()
-    sheet_reminder_scheduler = start_sheet_reminder_scheduler()
 
+    is_serverless = os.getenv("VERCEL", "").lower() in ("1", "true") or bool(os.getenv("VERCEL_ENV"))
     is_sqlite = engine.url.drivername == "sqlite"
 
-    # Local/dev default: skip heavy bootstrap migrations/backfills after core tables exist.
-    # Default behavior:
-    # - SQLite (local dev): skip heavy bootstrap
-    # - PostgreSQL (prod/staging): run bootstrap
-    # Override with SKIP_STARTUP_BOOTSTRAP=1/0 when needed.
+    # The in-process sheet reminder scheduler is designed for long-lived processes
+    # (e.g., a single Railway/Docker container). On Vercel Serverless Functions each
+    # cold-start would spin up a new scheduler instance, causing duplicate emails.
+    # Disable it automatically on serverless; use Vercel Cron + POST /tasks/cron/reminders
+    # to send reminders on a schedule instead (see repo-root vercel.json).
+    if is_serverless and os.getenv("SHEET_REMINDER_SCHEDULER_ENABLED") is None:
+        print("[EMAIL] Sheet reminder scheduler disabled (serverless environment)")
+        os.environ["SHEET_REMINDER_SCHEDULER_ENABLED"] = "false"
+    sheet_reminder_scheduler = start_sheet_reminder_scheduler()
+
+    # Skip heavy bootstrap migrations/backfills on serverless where instances are short-lived
+    # and each cold-start re-runs this code. Migrations are meant to be applied once per
+    # environment; set SKIP_STARTUP_BOOTSTRAP=0 in your first deploy, then switch to 1.
     skip_startup_bootstrap = os.getenv("SKIP_STARTUP_BOOTSTRAP")
     if skip_startup_bootstrap is None:
-        skip_startup_bootstrap = "1" if is_sqlite else "0"
+        skip_startup_bootstrap = "1" if (is_sqlite or is_serverless) else "0"
 
     if skip_startup_bootstrap == "1":
         print("[startup] SKIP_STARTUP_BOOTSTRAP=1 -> core tables ready, skipping heavy startup bootstrap")
@@ -563,10 +571,6 @@ origins = [
     "http://localhost:3001",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
-    "https://work-force-pro-4jae.vercel.app",  # Your Vercel deployment
-    "https://work-force-pro-demo-app.vercel.app", # New Vercel demo app
-    "https://attendence-dashboard.allytechcourses.com",  # Custom domain
-    "https://www.work-force-pro-demo-app.vercel.app", # With www prefix
 ]
 
 # Add production frontend URL if set

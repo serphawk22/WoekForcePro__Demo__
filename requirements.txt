@@ -1,0 +1,4 @@
+# Root requirements.txt — used by the Vercel Python Functions build.
+# Keep the canonical list in backend/requirements.txt and reference it here
+# so there is a single source of truth for local dev, Docker, and CI.
+-r backend/requirements.txt

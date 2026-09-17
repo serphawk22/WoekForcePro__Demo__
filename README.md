@@ -47,7 +47,7 @@ A modern, full-stack workforce management platform designed to streamline employ
 
 ### Backend
 - **Framework**: [FastAPI](https://fastapi.tiangolo.com/) 0.109.0
-- **Language**: Python 3.8+
+- **Language**: Python 3.11
 - **Database**: [PostgreSQL](https://www.postgresql.org/)
 - **ORM**: [SQLModel](https://sqlmodel.tiangolo.com/) 0.0.34
 - **Authentication**: [python-jose](https://github.com/mpdavis/python-jose) (JWT)
@@ -60,7 +60,7 @@ A modern, full-stack workforce management platform designed to streamline employ
 Before you begin, ensure you have the following installed:
 
 - **Node.js** 18.x or higher
-- **Python** 3.8 or higher
+- **Python** 3.11
 - **PostgreSQL** 12 or higher
 - **npm** or **yarn** package manager
 - **pip** Python package manager
@@ -393,28 +393,51 @@ Streamlined request workflow:
 
 ### Production Deployment
 
-WorkForcePro is ready for production deployment to Railway (Backend) and Vercel (Frontend).
+WorkForce Pro deploys entirely on **Vercel** as **two projects** in the same account:
 
-#### Quick Deploy
+| Project | Root directory | What it runs | Files |
+|---|---|---|---|
+| **Backend** | repo root | FastAPI via Vercel Python Functions (`requirements.txt` + `api/index.py`) | `vercel.json`, `api/index.py`, `requirements.txt` |
+| **Frontend** | `frontend` | Next.js (App Router) | `frontend/vercel.json`, `frontend/next.config.js` |
 
-**Backend (Railway):**
-1. Create Railway account
-2. New Project → Deploy from GitHub
-3. Add PostgreSQL database
-4. Configure environment variables
-5. Deploy automatically
+The frontend proxies `/api/*` to the backend URL (set via `BACKEND_API_URL`), so the
+browser only ever talks to one origin and CORS is not in the hot path.
 
-**Frontend (Vercel):**
-1. Create Vercel account
-2. Import GitHub repository
-3. Set root directory to `frontend`
-4. Add `NEXT_PUBLIC_API_URL` environment variable
-5. Deploy automatically
+#### 1. Backend project
+
+1. Create a Vercel project and import this GitHub repo with the **Root Directory left as `/`**.
+2. Add these environment variables:
+   - `DATABASE_URL` — your PostgreSQL connection string (Neon, Supabase, Vercel Postgres, …). PostgreSQL is required.
+   - `SECRET_KEY` — generate with `openssl rand -hex 32`. The app **refuses to start in production without it**.
+   - `FRONTEND_URL` / `FRONTEND_URLS` — your frontend origin(s), comma-separated (CORS allowlist).
+   - Optional: `OPENAI_API_KEY` (AI assistant), `EMAIL_*` (reminder emails), `CRON_SECRET` (Vercel Cron auth).
+3. **First deploy only:** set `SKIP_STARTUP_BOOTSTRAP=0` so the startup migrations run once.
+   After the first successful deploy, remove it (or set it to `1`) for fast cold-starts.
+4. Deploy. The backend is now at `https://<your-backend-project>.vercel.app`.
+
+**Recurring tasks & email reminders** are driven by **Vercel Cron Jobs** (defined in `vercel.json`:
+`POST /tasks/recurring/materialize` daily and `POST /tasks/cron/reminders` daily). The in-process
+scheduler is automatically disabled on serverless. In the Vercel dashboard → **Settings → Cron Jobs**,
+set the **Cron Secret** to the same value as your `CRON_SECRET` env var so the jobs authenticate.
+
+#### 2. Frontend project
+
+1. Create a second Vercel project from the **same** repo, this time with the **Root Directory set to `frontend`**.
+2. Add environment variables:
+   - `BACKEND_API_URL=https://<your-backend-project>.vercel.app`
+   - `NEXT_PUBLIC_API_URL=https://<your-backend-project>.vercel.app`
+3. Deploy automatically — Vercel detects Next.js from `frontend/` and runs `npm run build`, `npm start`.
+
+The frontend is now at `https://<your-frontend-project>.vercel.app`. Log in with the
+default admin (`admin@gmail.com` / `admin`) — **change it immediately**.
+
+#### 3. CI
+
+`.github/workflows/ci.yml` runs on every push/PR: backend import smoke tests, a full
+DB-bootstrap test against PostgreSQL 16, and a frontend type check + production build.
 
 #### Detailed Guides
 
-- **📖 [Complete Deployment Guide](./DEPLOYMENT_GUIDE.md)** - Step-by-step instructions
-- **✅ [Deployment Checklist](./DEPLOYMENT_CHECKLIST.md)** - Pre and post-deployment tasks
-- **🚂 [Railway Setup](./backend/RAILWAY_SETUP.md)** - Backend specific configuration
-- **▲ [Vercel Setup](./frontend/VERCEL_SETUP.md)** - Frontend specific configuration
+- **✅ [Vercel-only deployment checklist](#-deployment)** — see the two steps above
+- **🌿 Local dev** — see [Installation & Setup](#-installation--setup) above
 

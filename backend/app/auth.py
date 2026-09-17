@@ -17,7 +17,18 @@ from app.models import User, TokenData, UserRole
 load_dotenv()
 
 # Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "your-super-secret-key-change-this")
+# Fail fast in production: a missing SECRET_KEY would silently sign tokens with
+# a well-known value. Vercel sets VERCEL_ENV/VERCEL, so those are reliable
+# production signals when deployed.
+_PRODUCTION = os.getenv("VERCEL_ENV") == "production" or os.getenv("RENDER_ENV") == "production"
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    if _PRODUCTION:
+        raise RuntimeError(
+            "SECRET_KEY is required in production. Set it in your hosting "
+            "platform's environment variables before deploying."
+        )
+    SECRET_KEY = "dev-only-insecure-secret-key-change-me"
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))  # 8 hours
 COOKIE_NAME = "access_token"

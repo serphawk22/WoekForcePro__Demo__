@@ -40,21 +40,31 @@ const nextConfig = {
    * Avoids CORS/IPv6 "localhost" quirks and matches production (Vercel → Railway via NEXT_PUBLIC_API_URL).
    */
   async rewrites() {
-    const localBackend = normalizeBackendUrl(
-      process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_API_URL,
-      "http://127.0.0.1:8000",
-      true
-    );
-    // Do not trust NEXT_PUBLIC_API_URL in production rewrites; it is often set for client use and can be stale/wrong.
-    const productionBackend = normalizeBackendUrl(
-      process.env.BACKEND_API_URL,
-      "https://workforcepro-demo-app-production.up.railway.app"
-    );
-    const backend = isDevServer ? localBackend : productionBackend;
+    if (isDevServer) {
+      // Local dev: browser calls same-origin `/api/...`; Next proxies to FastAPI
+      // on this machine. Avoids CORS/IPv6 "localhost" quirks.
+      const localBackend = normalizeBackendUrl(
+        process.env.NEXT_PUBLIC_API_URL || process.env.BACKEND_API_URL,
+        "http://127.0.0.1:8000",
+        true
+      );
+      return [
+        {
+          source: "/api/:path*",
+          destination: `${localBackend.replace(/\/$/, "")}/:path*`,
+        },
+      ];
+    }
+
+    // Production: the backend is its own Vercel project. Rewrite /api/* to it only
+    // when BACKEND_API_URL is provided; otherwise leave /api/* untouched
+    // (e.g. same-origin reverse proxy or serverless function on this domain).
+    const productionBackend = normalizeBackendUrl(process.env.BACKEND_API_URL, "");
+    if (!productionBackend) return [];
     return [
       {
         source: "/api/:path*",
-        destination: `${backend.replace(/\/$/, "")}/:path*`,
+        destination: `${productionBackend.replace(/\/$/, "")}/:path*`,
       },
     ];
   },

@@ -19,7 +19,21 @@ class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://localhost/workforcepro")
     
     # JWT Authentication
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-super-secret-key-change-this-in-production")
+    # Fail fast in production: a missing SECRET_KEY would silently sign tokens
+    # with a well-known value.
+    if os.getenv("SECRET_KEY"):
+        SECRET_KEY: str = os.getenv("SECRET_KEY")
+    else:
+        _is_prod = (
+            os.getenv("VERCEL_ENV") == "production"
+            or os.getenv("RENDER_ENV") == "production"
+        )
+        if _is_prod:
+            raise RuntimeError(
+                "SECRET_KEY is required in production. Set it in your hosting "
+                "platform's environment variables before deploying."
+            )
+        SECRET_KEY: str = "dev-only-insecure-secret-key-change-me"
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     

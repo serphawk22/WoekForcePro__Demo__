@@ -150,3 +150,7 @@ async def stop_sheet_reminder_scheduler(handle: Optional[tuple[asyncio.Task, asy
         await asyncio.wait_for(task, timeout=5)
     except asyncio.TimeoutError:
         task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass

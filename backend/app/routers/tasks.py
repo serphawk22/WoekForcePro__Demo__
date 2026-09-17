@@ -698,14 +698,18 @@ async def materialize_recurring_instances(
     session: Session = Depends(get_session),
     current_user: Optional[User] = Depends(get_current_user_optional),
     x_cron_secret: Optional[str] = Header(default=None, alias="X-Cron-Secret"),
+    authorization: Optional[str] = Header(default=None),
 ):
     """
     Generate missing TaskInstance rows for all recurring tasks.
-    Callable by admin (JWT), or by cron with header X-Cron-Secret matching CRON_SECRET.
+    Callable by admin (JWT), by cron with header `X-Cron-Secret` matching
+    `CRON_SECRET`, or via Vercel Cron which sends `Authorization: Bearer <CRON_SECRET>`.
     """
-    import os
     secret = os.getenv("CRON_SECRET", "")
-    cron_ok = bool(secret and x_cron_secret == secret)
+    cron_ok = bool(secret and (
+        x_cron_secret == secret
+        or (authorization is not None and authorization.strip() == f"Bearer {secret}")
+    ))
     admin_ok = current_user is not None and is_admin_user(current_user)
     if not cron_ok and not admin_ok:
         raise HTTPException(status_code=403, detail="Not authorized")
@@ -718,10 +722,14 @@ async def send_task_and_happy_sheet_reminders(
     session: Session = Depends(get_session),
     current_user: Optional[User] = Depends(get_current_user_optional),
     x_cron_secret: Optional[str] = Header(default=None, alias="X-Cron-Secret"),
+    authorization: Optional[str] = Header(default=None),
 ):
     """Send email reminders to users who have not submitted task sheet or happy sheet today."""
     secret = os.getenv("CRON_SECRET", "")
-    cron_ok = bool(secret and x_cron_secret == secret)
+    cron_ok = bool(secret and (
+        x_cron_secret == secret
+        or (authorization is not None and authorization.strip() == f"Bearer {secret}")
+    ))
     admin_ok = current_user is not None and is_admin_user(current_user)
     if not cron_ok and not admin_ok:
         raise HTTPException(status_code=403, detail="Not authorized")
