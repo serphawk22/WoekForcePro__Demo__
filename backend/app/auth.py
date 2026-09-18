@@ -18,9 +18,14 @@ load_dotenv()
 
 # Configuration
 # Fail fast in production: a missing SECRET_KEY would silently sign tokens with
-# a well-known value. Vercel sets VERCEL_ENV/VERCEL, so those are reliable
-# production signals when deployed.
-_PRODUCTION = os.getenv("VERCEL_ENV") == "production" or os.getenv("RENDER_ENV") == "production"
+# a well-known value. Detect production on Vercel and Railway so we refuse to
+# start with a weak default key once deployed.
+_PRODUCTION = (
+    os.getenv("VERCEL_ENV") == "production"
+    or os.getenv("RENDER_ENV") == "production"
+    or os.getenv("RAILWAY_ENV") == "production"
+    or os.getenv("RAILWAY_ENVIRONMENT") == "production"
+)
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     if _PRODUCTION:

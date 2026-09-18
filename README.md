@@ -393,45 +393,61 @@ Streamlined request workflow:
 
 ### Production Deployment
 
-WorkForce Pro deploys entirely on **Vercel** as **two projects** in the same account:
+The backend can be hosted on **Railway** (long-lived container, in-process
+scheduler) or **Vercel** (serverless Functions). The **frontend is always on
+Vercel** and proxies `/api/*` to the backend URL (set via `BACKEND_API_URL`), so
+the browser talks to one origin and CORS is not in the hot path:
 
-| Project | Root directory | What it runs | Files |
-|---|---|---|---|
-| **Backend** | repo root | FastAPI via Vercel Python Functions (`requirements.txt` + `api/index.py`) | `vercel.json`, `api/index.py`, `requirements.txt` |
-| **Frontend** | `frontend` | Next.js (App Router) | `frontend/vercel.json`, `frontend/next.config.js` |
+| Project | Platform | Root directory | What it runs | Files |
+|---|---|---|---|---|
+| **Backend** | Railway **or** Vercel | repo root | FastAPI + uvicorn | `nixpacks.toml`, `backend/railway.json`, `backend/Procfile` (Railway) · `pyproject.toml`, `api/index.py`, `vercel.json` (Vercel) |
+| **Frontend** | Vercel | `frontend` | Next.js (App Router) | `frontend/vercel.json`, `frontend/next.config.js` |
 
-The frontend proxies `/api/*` to the backend URL (set via `BACKEND_API_URL`), so the
-browser only ever talks to one origin and CORS is not in the hot path.
+Shared backend env vars for either platform:
+`DATABASE_URL`, `SECRET_KEY` (generate with `openssl rand -hex 32`; the app
+**refuses to start in production without it**), `FRONTEND_URL` / `FRONTEND_URLS`
+(CORS allowlist), plus optional `OPENAI_API_KEY`, `EMAIL_*`, `CRON_SECRET`.
 
-#### 1. Backend project
+#### 1. Backend on Railway (option A)
 
-1. Create a Vercel project and import this GitHub repo with the **Root Directory left as `/`**.
-2. Add these environment variables:
-   - `DATABASE_URL` — your PostgreSQL connection string (Neon, Supabase, Vercel Postgres, …). PostgreSQL is required.
-   - `SECRET_KEY` — generate with `openssl rand -hex 32`. The app **refuses to start in production without it**.
-   - `FRONTEND_URL` / `FRONTEND_URLS` — your frontend origin(s), comma-separated (CORS allowlist).
-   - Optional: `OPENAI_API_KEY` (AI assistant), `EMAIL_*` (reminder emails), `CRON_SECRET` (Vercel Cron auth).
-3. **First deploy only:** set `SKIP_STARTUP_BOOTSTRAP=0` so the startup migrations run once.
-   After the first successful deploy, remove it (or set it to `1`) for fast cold-starts.
-4. Deploy. The backend is now at `https://<your-backend-project>.vercel.app`.
+1. On Railway, **New Project → Deploy from GitHub repo** (or use the existing
+   `WorkForcePro` service). No build/start command changes needed — `backend/railway.json`
+   and `nixpacks.toml` define them (Python 3.11, `uvicorn app.main:app --port $PORT`).
+2. Add the shared env vars above. Railway sets `RAILWAY_ENV=production`, which the app
+   uses to require `SECRET_KEY`.
+3. Deploy. Startup runs the DB migration bootstrap automatically (Postgres).
+4. Backend URL: `https://<service>.up.railway.app`.
 
-**Recurring tasks & email reminders** are driven by **Vercel Cron Jobs** (defined in `vercel.json`:
-`POST /tasks/recurring/materialize` daily and `POST /tasks/cron/reminders` daily). The in-process
-scheduler is automatically disabled on serverless. In the Vercel dashboard → **Settings → Cron Jobs**,
-set the **Cron Secret** to the same value as your `CRON_SECRET` env var so the jobs authenticate.
+**Recurring tasks & email reminders** run in-process via APScheduler (enabled on
+Railway — the app only disables it on Vercel serverless). Set the `EMAIL_*` vars
+and `SHEET_REMINDER_SCHEDULER_ENABLED=true`.
 
-#### 2. Frontend project
+#### 2. Backend on Vercel (option B)
 
-1. Create a second Vercel project from the **same** repo, this time with the **Root Directory set to `frontend`**.
+1. Create a Vercel project and import the repo with **Root Directory left as `/`**
+   and Framework Preset set to **FastAPI** (or let it auto-detect from `pyproject.toml`).
+2. Add the shared env vars above + `CRON_SECRET`.
+3. **First deploy only:** set `SKIP_STARTUP_BOOTSTRAP=0` so migrations run once;
+   then remove it (or set to `1`) for fast cold-starts.
+4. Deploy. Backend URL: `https://<your-backend-project>.vercel.app`.
+
+**Recurring tasks & email reminders** are driven by **Vercel Cron Jobs** (defined in
+`vercel.json`: `POST /tasks/recurring/materialize` daily and `POST /tasks/cron/reminders`
+daily). The in-process scheduler auto-disables on serverless. In the Vercel dashboard →
+**Settings → Cron Jobs**, set the **Cron Secret** to your `CRON_SECRET` value.
+
+#### 3. Frontend project (Vercel)
+
+1. Create a second Vercel project from the **same** repo, with the **Root Directory set to `frontend`**.
 2. Add environment variables:
-   - `BACKEND_API_URL=https://<your-backend-project>.vercel.app`
-   - `NEXT_PUBLIC_API_URL=https://<your-backend-project>.vercel.app`
-3. Deploy automatically — Vercel detects Next.js from `frontend/` and runs `npm run build`, `npm start`.
+   - `BACKEND_API_URL=https://<backend-url>` — your Railway (`…up.railway.app`) or Vercel (`…vercel.app`) backend.
+   - `NEXT_PUBLIC_API_URL=https://<backend-url>` (same value).
+3. Deploy automatically — Vercel detects Next.js in `frontend/` and runs `npm run build`, `npm start`.
 
 The frontend is now at `https://<your-frontend-project>.vercel.app`. Log in with the
 default admin (`admin@gmail.com` / `admin`) — **change it immediately**.
 
-#### 3. CI
+#### 4. CI
 
 `.github/workflows/ci.yml` runs on every push/PR: backend import smoke tests, a full
 DB-bootstrap test against PostgreSQL 16, and a frontend type check + production build.

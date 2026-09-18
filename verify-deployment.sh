@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# WorkForcePro Deployment Verification Script (Vercel-only)
-# Helps confirm the repo is ready to deploy to Vercel as:
-#   1. Backend project  → repo root (FastAPI via Vercel Python Functions)
-#   2. Frontend project → frontend/ (Next.js)
+# WorkForcePro Deployment Verification Script (Vercel + Railway ready)
+# Helps confirm the repo is ready to deploy as:
+#   1. Backend project  → repo root (Railway container OR Vercel Python Functions)
+#   2. Frontend project → frontend/ (Next.js, deployed on Vercel)
 
 echo "WorkForce Pro Deployment Verification (Vercel)"
 echo "==============================================="

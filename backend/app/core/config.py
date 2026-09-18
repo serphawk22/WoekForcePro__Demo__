@@ -27,6 +27,8 @@ class Settings:
         _is_prod = (
             os.getenv("VERCEL_ENV") == "production"
             or os.getenv("RENDER_ENV") == "production"
+            or os.getenv("RAILWAY_ENV") == "production"
+            or os.getenv("RAILWAY_ENVIRONMENT") == "production"
         )
         if _is_prod:
             raise RuntimeError(
