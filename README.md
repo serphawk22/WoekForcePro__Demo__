@@ -439,6 +439,10 @@ daily). The in-process scheduler auto-disables on serverless. In the Vercel dash
 #### 3. Frontend project (Vercel)
 
 1. Create a second Vercel project from the **same** repo, with the **Root Directory set to `frontend`**.
+   - ⚠️ **Do not import the repo root** for this project. Importing `/` makes the build run
+     `npm run build` from the root, which rebuilds the app but leaves `.next` inside `frontend/`,
+     so Vercel fails with `No Output Directory named "public" found`. Set **Root Directory =
+     `frontend`** (and **Framework Preset = Next.js**).
 2. Add environment variables:
    - `BACKEND_API_URL=https://<backend-url>` — your Railway (`…up.railway.app`) or Vercel (`…vercel.app`) backend.
    - `NEXT_PUBLIC_API_URL=https://<backend-url>` (same value).
