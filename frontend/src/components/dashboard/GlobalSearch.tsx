@@ -70,6 +70,16 @@ const STATIC_FEATURES: ExtendedSearchResult[] = [
     route: "/employee-dashboard",
     priority_score: 85,
     icon: "🏠"
+  },
+  {
+    id: "feat_7",
+    title: "Performance",
+    subtitle: "Track each employee's performance",
+    type: "Feature",
+    keywords: ["performance", "score", "productivity", "employee performance", "kpi"],
+    route: "/performance",
+    priority_score: 88,
+    icon: "🏆"
   }
 ];
 

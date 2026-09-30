@@ -40,13 +40,7 @@ export function getApiBaseUrl(): string {
   }
 
   // If we are executing server-side (Next.js RSC/SSR):
-  const backendUrl = process.env.BACKEND_API_URL?.trim() || "";
-  const serverUrl = normalizeServerApiUrl(explicitApiUrl || backendUrl || "");
-  // When running on Vercel the frontend project must reach the backend via an
-  // explicit URL (the backend is a separate Vercel project). If no explicit URL
-  // is set, fall back to localhost for local prod builds / self-hosted
-  // single-process deployments.
-  return serverUrl || "http://127.0.0.1:8000";
+  return normalizeServerApiUrl(explicitApiUrl || "") || "https://workforcepro-demo-app-production.up.railway.app";
 }
 
 // Simple cache to prevent redundant API calls
@@ -1251,6 +1245,23 @@ export async function getAllAttendance(
   
   const query = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<AttendanceRecord[]>(`/attendance/all${query}`);
+}
+
+/**
+ * Team attendance for the current organization (admin and employee).
+ * Hours are computed from punch in/out when total_hours is missing.
+ */
+export async function getTeamAttendance(filters?: {
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+}): Promise<ApiResponse<AttendanceRecord[]>> {
+  const params = new URLSearchParams();
+  if (filters?.startDate) params.append("start_date", filters.startDate);
+  if (filters?.endDate) params.append("end_date", filters.endDate);
+  if (filters?.limit) params.append("limit", String(filters.limit));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<AttendanceRecord[]>(`/attendance/team${query}`);
 }
 
 /**
