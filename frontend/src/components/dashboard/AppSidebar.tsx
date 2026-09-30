@@ -21,6 +21,7 @@ import {
   PanelLeftClose,
   Zap,
   AlertCircle,
+  Trophy,
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { getApiBaseUrl, getWorkspaces, Workspace } from "@/lib/api";
@@ -63,12 +64,14 @@ const adminLinks = [
   { label: "Requests", icon: MessageSquare, path: "/requests" },
   { label: "Ticket Management", icon: AlertCircle, path: "/admin/queries" },
   { label: "Employees", icon: Users, path: "/employees" },
+  { label: "Performance", icon: Trophy, path: "/performance" },
   { label: "User Approvals", icon: UserCheck, path: "/admin/approvals", badgeKey: "pending" },
   { label: "The Lighthouse", icon: LighthouseNavIcon, path: "/my-space/task-sheet" },
 ];
 
 const employeeLinks = [
   { label: "My Dashboard", icon: LayoutDashboard, path: "/employee-dashboard" },
+  { label: "Performance", icon: Trophy, path: "/performance" },
   { label: "Project Management", icon: FolderKanban, path: "/project-management" },
   { label: "Requests", icon: MessageSquare, path: "/requests" },
   { label: "The Lighthouse", icon: LighthouseNavIcon, path: "/my-space/task-sheet" },

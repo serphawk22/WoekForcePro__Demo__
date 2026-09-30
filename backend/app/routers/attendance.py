@@ -28,6 +28,28 @@ def format_utc_datetime(dt: Optional[datetime]) -> Optional[str]:
     utc_dt = dt.astimezone(timezone.utc)
     return utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def computed_total_hours(record: Attendance, now: Optional[datetime] = None) -> float:
+    """Return stored hours, or derive them from punch in/out (including open sessions)."""
+    if record.total_hours is not None and record.total_hours > 0:
+        return round(float(record.total_hours), 2)
+
+    punch_in = _as_utc(record.punch_in)
+    if not punch_in:
+        return 0.0
+
+    punch_out = _as_utc(record.punch_out) or (now or datetime.now(timezone.utc))
+    seconds = (punch_out - punch_in).total_seconds()
+    return max(0.0, round(seconds / 3600, 2))
+
 @router.post("/punch-in", response_model=AttendanceRead)
 async def punch_in(
     request: Request,
@@ -188,7 +210,45 @@ async def get_my_attendance(
             "date": record.date,
             "punch_in": format_utc_datetime(record.punch_in),
             "punch_out": format_utc_datetime(record.punch_out),
-            "total_hours": record.total_hours
+            "total_hours": computed_total_hours(record)
+        }
+        for record in records
+    ]
+
+
+@router.get("/team")
+async def get_team_attendance(
+    request: Request,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    limit: int = 2000,
+    session: Session = Depends(get_session),
+    admin: User = Depends(get_current_admin_user),
+):
+    """
+    Attendance records for everyone in the admin's organization.
+    Admin-only. Employees should use /attendance/me for their own hours.
+    """
+    statement = select(Attendance).where(
+        Attendance.organization_id == admin.organization_id,
+    )
+    if start_date:
+        statement = statement.where(Attendance.date >= start_date)
+    if end_date:
+        statement = statement.where(Attendance.date <= end_date)
+
+    statement = statement.order_by(Attendance.date.desc(), Attendance.punch_in.desc()).limit(limit)
+    records = session.exec(statement).all()
+    now = datetime.now(timezone.utc)
+
+    return [
+        {
+            "id": record.id,
+            "user_id": record.user_id,
+            "date": record.date,
+            "punch_in": format_utc_datetime(record.punch_in),
+            "punch_out": format_utc_datetime(record.punch_out),
+            "total_hours": computed_total_hours(record, now),
         }
         for record in records
     ]
@@ -363,7 +423,7 @@ async def get_all_attendance(
             "date": record.date,
             "punch_in": format_utc_datetime(record.punch_in),
             "punch_out": format_utc_datetime(record.punch_out),
-            "total_hours": record.total_hours,
+            "total_hours": computed_total_hours(record),
             "user_name": user.name if user else None,
             "user_email": user.email if user else None,
             "user_role": user.role if user else None,

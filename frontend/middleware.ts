@@ -164,6 +164,7 @@ export async function middleware(request: NextRequest) {
     "/project-management",
     "/my-space",
     "/my-day",
+    "/performance",
   ];
   const isProtectedRoute = protectedRoutes.some(route => pathname === route || pathname.startsWith(route + "/"));
   
